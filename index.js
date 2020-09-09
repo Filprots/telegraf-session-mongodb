@@ -2,37 +2,36 @@ class TelegrafMongoSession {
     constructor(db, options) {
         this.options = Object.assign({
             sessionName: 'session',
-            collectionName: 'sessions'
+            collectionName: 'sessions',
+            getSessionKey: (ctx) => {
+                // if ctx has chat object, we use chat.id
+                // if ctx has callbackquery object, we use cb.chat_instance
+                // if ctx does not have any of the fields mentioned above, we use from.id
+                const {chat, callbackQuery, from} = ctx;
+
+                if (chat && chat.type === 'channel' && !from) {
+                    return `ch:${chat.id}`;
+                }
+
+                const id = chat ? chat.id : (callbackQuery ? callbackQuery.chat_instance : from.id);
+                return `${id}:${from.id}`;
+            }
         }, options);
         this.db = db;
         this.collection = db.collection(this.options.collectionName);
     }
 
     async saveSession(key, session) {
-        return await this.collection.updateOne({ key: key }, { $set: { data: session } }, { upsert: true });
+        return await this.collection.updateOne({key: key}, {$set: {data: session}}, {upsert: true});
     }
 
     async getSession(key) {
-        const doc = await this.collection.findOne({ key: key });
+        const doc = await this.collection.findOne({key: key});
         return doc ? doc.data : {};
     }
 
-    getSessionKey(ctx) {
-        // if ctx has chat object, we use chat.id
-        // if ctx has callbackquery object, we use cb.chat_instance
-        // if ctx does not have any of the fields mentioned above, we use from.id
-        const { chat, callbackQuery, from } = ctx;
-
-        if (chat && chat.type === 'channel' && !from) {
-            return `ch:${chat.id}`;
-        }
-
-        const id = chat ? chat.id : (callbackQuery ? callbackQuery.chat_instance : from.id);
-        return `${id}:${from.id}`;
-    }
-
     async middleware(ctx, next) {
-        const key = this.getSessionKey(ctx);
+        const key = this.options.getSessionKey(ctx);
         const session = await this.getSession(key);
 
         ctx[this.options.sessionName] = session;
@@ -45,8 +44,8 @@ class TelegrafMongoSession {
         let session;
         bot.use((...args) => session.middleware(...args));
 
-        const { MongoClient } = require('mongodb');
-        const client = await MongoClient.connect(mongo_url, { useNewUrlParser: true, useUnifiedTopology: true });
+        const {MongoClient} = require('mongodb');
+        const client = await MongoClient.connect(mongo_url, {useNewUrlParser: true, useUnifiedTopology: true});
         const db = client.db();
 
         session = new TelegrafMongoSession(db, params);
